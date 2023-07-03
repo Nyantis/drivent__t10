@@ -1,22 +1,29 @@
 import { Address, Enrollment } from '@prisma/client';
 import { request } from '@/utils/request';
-import { invalidDataError, notFoundError } from '@/errors';
+import { notFoundError } from '@/errors';
 import addressRepository, { CreateAddressParams } from '@/repositories/address-repository';
 import enrollmentRepository, { CreateEnrollmentParams } from '@/repositories/enrollment-repository';
 import { exclude } from '@/utils/prisma-utils';
+import { ViaCEPAddress } from '@/protocols';
 
 // TODO - Receber o CEP por parâmetro nesta função.
-async function getAddressFromCEP() {
+async function getAddressFromCEP(cep:string) {
 
-  // FIXME: está com CEP fixo!
-  const result = await request.get(`${process.env.VIA_CEP_API}/37440000/json/`);
-
-  if (!result.data) {
-    throw notFoundError();
-  }
+  const result = await checkCep(cep)
 
   // FIXME: não estamos interessados em todos os campos
-  return result.data;
+
+  const { bairro, complemento, localidade, logradouro, uf } = result as ViaCEPAddress
+  const refact = {
+    bairro,
+    complemento,
+    cidade: localidade,
+    logradouro,
+    uf
+  } 
+  
+  return refact;
+  
 }
 
 async function getOneWithAddressByUserId(userId: number): Promise<GetOneWithAddressByUserIdResult> {
@@ -48,6 +55,7 @@ async function createOrUpdateEnrollmentWithAddress(params: CreateOrUpdateEnrollm
   const address = getAddressForUpsert(params.address);
 
   // TODO - Verificar se o CEP é válido antes de associar ao enrollment.
+  await checkCep(params.cpf)
 
   const newEnrollment = await enrollmentRepository.upsert(params.userId, enrollment, exclude(enrollment, 'userId'));
 
@@ -59,6 +67,14 @@ function getAddressForUpsert(address: CreateAddressParams) {
     ...address,
     ...(address?.addressDetail && { addressDetail: address.addressDetail }),
   };
+}
+
+async function checkCep(cep:string): Promise<Object>{
+  const result = await request.get(`${process.env.VIA_CEP_API}/${cep}/json/`);
+  if (!result.data || result.data.erro === true) {
+    throw notFoundError();
+  }
+  return result.data
 }
 
 export type CreateOrUpdateEnrollmentWithAddress = CreateEnrollmentParams & {
